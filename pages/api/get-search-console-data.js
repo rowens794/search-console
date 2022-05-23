@@ -1,17 +1,19 @@
 const { google } = require("googleapis");
-const fs = require("fs");
 const dayjs = require("dayjs");
+import PageData from "../../models/PageData";
+import dbConnect from "../../utils/dbConnect";
 
 const RETURN_ITEMS = 25000;
 
 export default async function handler(req, res) {
+  await dbConnect();
   let startingRecord = 0;
   let runSearch = true;
-  let masterObj = {};
 
   while (runSearch) {
     let data = await getData(startingRecord, RETURN_ITEMS);
-    masterObj = combineData(masterObj, data);
+    await saveToDB(data.rows);
+
     startingRecord = startingRecord + RETURN_ITEMS;
     if (startingRecord / RETURN_ITEMS > 100) runSearch = false;
     if (data.rows.length < RETURN_ITEMS) {
@@ -20,8 +22,6 @@ export default async function handler(req, res) {
     }
     console.log(`retrieved page ${startingRecord / RETURN_ITEMS}`);
   }
-
-  saveJSON(masterObj);
 
   res.status(200).json({ name: "John Doe" });
 }
@@ -52,49 +52,26 @@ const getData = (startingRecord, recordsToGet) => {
   return promise;
 };
 
-const combineData = (masterObj, newData) => {
-  newData.rows.forEach((item) => {
-    let url = item.keys[0];
-    let date = item.keys[1];
-    let { clicks, impressions, ctr, position } = item;
-    if (masterObj[url]) {
-      masterObj[url].push({
-        date: new Date(date),
-        clicks,
-        impressions,
-        ctr,
-        position,
-      });
-    } else {
-      masterObj[url] = [
-        {
-          date: new Date(date),
-          clicks,
-          impressions,
-          ctr,
-          position,
-        },
-      ];
-    }
-  });
+const saveToDB = (data) => {
+  return new Promise(async (res, rej) => {
+    let pageDateArray = [];
 
-  return masterObj;
-};
+    data.forEach((item) => {
+      let ein = item.keys[0].slice(42, 51);
 
-const saveJSON = (masterObj) => {
-  let promise = new Promise(async (resolve, reject) => {
-    let keys = Object.keys(masterObj);
-    keys.forEach((key) => {
-      masterObj[key] = masterObj[key].sort((a, b) => {
-        return a.date - b.date;
+      pageDateArray.push({
+        ein: ein,
+        date: new Date(item.keys[1]),
+        url: item.keys[0],
+        clicks: item.clicks,
+        impressions: item.impressions,
+        position: item.position,
       });
     });
 
-    let data = await JSON.stringify(masterObj);
-    await fs.writeFileSync("search-console-data.json", data);
+    console.log(pageDateArray.length);
+    await PageData.insertMany(pageDateArray);
 
-    resolve(null);
+    res(null);
   });
-
-  return promise;
 };
